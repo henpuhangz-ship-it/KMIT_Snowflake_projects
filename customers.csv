@@ -1,0 +1,6 @@
+customer_id,first_name,last_name,email,phone,address
+1,Amit,Sharma,amit.sharma@gmail.com,9876543210,"Delhi, India"
+2,Priya,Singh,priya.singh@yahoo.com,8765432109,"Mumbai, India"
+3,Rahul,Verma,rahul.verma@gmail.com,7654321098,"Bengaluru, India"
+4,Neha,Patel,neha.patel@yahoo.com,6543210987,"Ahmedabad, India"
+5,Arjun,Gupta,arjun.gupta@gmail.com,9876501234,"Hyderabad, India"
