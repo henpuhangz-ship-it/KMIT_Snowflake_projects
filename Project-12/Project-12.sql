@@ -1,0 +1,429 @@
+CREATE WAREHOUSE P12_RETAIL_WH
+WAREHOUSE_SIZE = 'XSMALL';
+USE WAREHOUSE P12_RETAIL_WH;
+
+CREATE DATABASE P12_RETAIL_DW;
+USE DATABASE P12_RETAIL_DW;
+
+CREATE SCHEMA P12_RETAIL_DW.SALES_ANALYTICS;
+USE SCHEMA SALES_ANALYTICS;
+
+CREATE or replace FILE FORMAT CSV_FORMAT
+TYPE = 'CSV'
+SKIP_HEADER = 1
+FIELD_DELIMITER = ','
+FIELD_OPTIONALLY_ENCLOSED_BY = '"';
+
+CREATE OR REPLACE STAGE P12_RETAIL_STAGE
+FILE_FORMAT = CSV_FORMAT;
+
+
+LIST @P12_RETAIL_STAGE;
+SHOW STAGES IN SCHEMA P12_RETAIL_DW.SALES_ANALYTICS;
+--===========================================================================
+
+--===============TASK 2=====================================================
+
+CREATE TABLE DIM_STORE
+(
+    STORE_KEY       NUMBER AUTOINCREMENT PRIMARY KEY,
+    STORE_ID        NUMBER,
+    STORE_NAME      VARCHAR(100),
+    CITY            VARCHAR(50),
+    STATE           VARCHAR(50),
+    STORE_MANAGER   VARCHAR(100)
+); 
+
+CREATE TABLE DIM_PRODUCT
+(
+    PRODUCT_KEY     NUMBER AUTOINCREMENT PRIMARY KEY,
+    PRODUCT_ID      NUMBER,
+    PRODUCT_NAME    VARCHAR(100),
+    CATEGORY        VARCHAR(50),
+    UNIT_PRICE      NUMBER(10,2)
+);
+
+CREATE TABLE DIM_CUSTOMER_HYBRID
+(
+    CUSTOMER_KEY       NUMBER AUTOINCREMENT PRIMARY KEY,
+    CUSTOMER_ID        NUMBER,
+    CUSTOMER_NAME      VARCHAR(100),
+    CITY               VARCHAR(50),
+    PREVIOUS_CITY      VARCHAR(50),
+    STATE              VARCHAR(50),
+    CURRENT_MEMBERSHIP VARCHAR(30),
+    PREVIOUS_MEMBERSHIP VARCHAR(30),
+    HISTORICAL_MEMBERSHIP VARCHAR(30),
+    SEGMENT             VARCHAR(30),
+    EFFECTIVE_DATE      DATE,
+    EXPIRY_DATE         DATE,
+    IS_CURRENT          BOOLEAN
+);
+
+--=======TASK 5,6========================================
+
+INSERT INTO DIM_STORE
+(
+    STORE_ID,
+    STORE_NAME,
+    CITY,
+    STATE,
+    STORE_MANAGER
+)
+SELECT
+    $1,
+    $2,
+    $3,
+    $4,
+    $5
+FROM @P12_RETAIL_STAGE/stores.csv
+(
+    FILE_FORMAT => 'CSV_FORMAT'
+);
+
+INSERT INTO DIM_PRODUCT
+(
+    PRODUCT_ID,
+    PRODUCT_NAME,
+    CATEGORY,
+    UNIT_PRICE
+)
+SELECT
+    $1,
+    $2,
+    $3,
+    $4
+FROM @P12_RETAIL_STAGE/products.csv
+(
+    FILE_FORMAT => 'CSV_FORMAT'
+);
+
+
+
+INSERT INTO DIM_CUSTOMER_HYBRID
+(
+    CUSTOMER_ID,
+    CUSTOMER_NAME,
+    CITY,
+    PREVIOUS_CITY,
+    STATE,
+    CURRENT_MEMBERSHIP,
+    PREVIOUS_MEMBERSHIP,
+    HISTORICAL_MEMBERSHIP,
+    SEGMENT,
+    EFFECTIVE_DATE,
+    EXPIRY_DATE,
+    IS_CURRENT    
+)
+SELECT
+    $1,
+    $2,
+    $3,
+    NULL,
+    $4,
+    $5,
+    NULL,
+    $5,
+    $6,
+    '2026-01-01',
+    '9999-12-31',
+    TRUE   
+FROM @P12_RETAIL_STAGE/customers_initial.csv
+(FILE_FORMAT => 'CSV_FORMAT');
+
+UPDATE DIM_CUSTOMER_HYBRID
+SET
+    EXPIRY_DATE = '9999-12-31',
+    IS_CURRENT = TRUE;
+
+SELECT * FROM DIM_STORE;
+
+
+--=======================TASK 7============================
+
+CREATE TABLE FACT_SALES
+(
+ SALES_KEY     NUMBER AUTOINCREMENT PRIMARY KEY,                       
+ TRANSACTION_ID    VARCHAR(50),                     
+ TRANSACTION_DATE  DATE,         
+ CUSTOMER_KEY      NUMBER,       
+ STORE_KEY         NUMBER,      
+ PRODUCT_KEY       NUMBER,    
+ QUANTITY          NUMBER,
+ UNIT_PRICE        NUMBER(10,2),
+ TOTAL_AMOUNT      NUMBER(12,2),      
+
+    CONSTRAINT FK_DIM_CUSTOMER_HYBRID
+        FOREIGN KEY (CUSTOMER_KEY)
+        REFERENCES DIM_CUSTOMER_HYBRID(CUSTOMER_KEY),
+        
+    CONSTRAINT FK_DIM_STORE
+        FOREIGN KEY (STORE_KEY)
+        REFERENCES DIM_STORE(STORE_KEY),
+        
+    CONSTRAINT FK_DIM_PRODUCT
+        FOREIGN KEY (PRODUCT_KEY)
+        REFERENCES DIM_PRODUCT(PRODUCT_KEY)
+);
+
+
+INSERT INTO FACT_SALES(
+    TRANSACTION_ID,
+    TRANSACTION_DATE,
+    CUSTOMER_KEY,
+    STORE_KEY,
+    PRODUCT_KEY,
+    QUANTITY,
+    UNIT_PRICE,
+    TOTAL_AMOUNT
+)
+SELECT
+    'TXN-1001',
+    '2026-02-15',
+    C.CUSTOMER_KEY,
+    S.STORE_KEY,
+    P.PRODUCT_KEY,
+    1,
+    P.UNIT_PRICE,
+    1* P.UNIT_PRICE
+FROM DIM_CUSTOMER_HYBRID C
+JOIN DIM_STORE S
+    ON S.STORE_ID = 201
+JOIN DIM_PRODUCT P
+    ON P.PRODUCT_ID = 501
+WHERE C.CUSTOMER_ID = 101
+  AND C.IS_CURRENT = TRUE;
+
+  
+INSERT INTO FACT_SALES(
+    TRANSACTION_ID,
+    TRANSACTION_DATE,
+    CUSTOMER_KEY,
+    STORE_KEY,
+    PRODUCT_KEY,
+    QUANTITY,
+    UNIT_PRICE,
+    TOTAL_AMOUNT
+)
+SELECT
+    'TXN-1002',
+    '2026-03-10',
+    C.CUSTOMER_KEY,
+    S.STORE_KEY,
+    P.PRODUCT_KEY,
+    2,
+    P.UNIT_PRICE,
+    2* P.UNIT_PRICE
+FROM DIM_CUSTOMER_HYBRID C
+JOIN DIM_STORE S
+    ON S.STORE_ID = 203
+JOIN DIM_PRODUCT P
+    ON P.PRODUCT_ID = 502
+WHERE C.CUSTOMER_ID = 103
+  AND C.IS_CURRENT = TRUE;
+
+
+--===============TASK 9======================
+UPDATE DIM_STORE
+SET
+    STORE_MANAGER = 'Suresh Menon'
+WHERE
+    STORE_ID=201;
+
+
+
+--===============TASK 10======================
+
+/*==============================================================
+  TASK 10 — STEP 1: Expire active records (1 row each)
+==============================================================*/
+
+UPDATE DIM_CUSTOMER_HYBRID
+SET EXPIRY_DATE = '2026-03-31', IS_CURRENT = FALSE
+WHERE CUSTOMER_ID = 101 AND IS_CURRENT = TRUE;
+
+UPDATE DIM_CUSTOMER_HYBRID
+SET EXPIRY_DATE = '2026-04-04', IS_CURRENT = FALSE
+WHERE CUSTOMER_ID = 103 AND IS_CURRENT = TRUE;
+
+UPDATE DIM_CUSTOMER_HYBRID
+SET EXPIRY_DATE = '2026-04-09', IS_CURRENT = FALSE
+WHERE CUSTOMER_ID = 104 AND IS_CURRENT = TRUE;
+
+
+/*==============================================================
+  STEP 2: Insert new active rows (3 rows total)
+==============================================================*/
+
+INSERT INTO DIM_CUSTOMER_HYBRID
+(
+    CUSTOMER_ID, CUSTOMER_NAME, CITY, PREVIOUS_CITY, STATE,
+    CURRENT_MEMBERSHIP, PREVIOUS_MEMBERSHIP, HISTORICAL_MEMBERSHIP,
+    SEGMENT, EFFECTIVE_DATE, EXPIRY_DATE, IS_CURRENT
+)
+SELECT
+    U.$1,
+    U.$2,
+    U.$3,
+    C.CITY,
+    U.$4,
+    U.$5,
+    C.CURRENT_MEMBERSHIP,
+    U.$5,
+    U.$6,
+    U.$7,
+    '9999-12-31',
+    TRUE
+FROM @P12_RETAIL_STAGE/customer_updates.csv
+    (FILE_FORMAT => 'CSV_FORMAT') U
+JOIN DIM_CUSTOMER_HYBRID C
+    ON C.CUSTOMER_ID = U.$1
+    AND C.IS_CURRENT = FALSE
+    AND C.EXPIRY_DATE <> '9999-12-31';
+
+
+/*==============================================================
+  STEP 3: Sync Type-1/3/6 columns across ALL rows (2 rows each)
+==============================================================*/
+
+UPDATE DIM_CUSTOMER_HYBRID
+SET CITY              = 'Bengaluru',
+    PREVIOUS_CITY     = 'Hyderabad',
+    STATE             = 'Karnataka',
+    CURRENT_MEMBERSHIP  = 'Gold',
+    PREVIOUS_MEMBERSHIP = 'Silver'
+WHERE CUSTOMER_ID = 101;
+
+UPDATE DIM_CUSTOMER_HYBRID
+SET CITY              = 'Chennai',
+    PREVIOUS_CITY     = 'Vijayawada',
+    STATE             = 'Tamil Nadu',
+    CURRENT_MEMBERSHIP  = 'Gold',
+    PREVIOUS_MEMBERSHIP = 'Silver'
+WHERE CUSTOMER_ID = 103;
+
+UPDATE DIM_CUSTOMER_HYBRID
+SET CURRENT_MEMBERSHIP  = 'Platinum',
+    PREVIOUS_MEMBERSHIP = 'Gold'
+WHERE CUSTOMER_ID = 104;
+
+/*==============================================================
+  TASK 11 — INSERT NEW SALES TRANSACTION
+  Customer 101 must use the NEW active customer surrogate key
+==============================================================*/
+
+INSERT INTO FACT_SALES
+(
+    TRANSACTION_ID,
+    TRANSACTION_DATE,
+    CUSTOMER_KEY,
+    STORE_KEY,
+    PRODUCT_KEY,
+    QUANTITY,
+    UNIT_PRICE,
+    TOTAL_AMOUNT
+)
+SELECT
+    'TXN-2001',
+    '2026-04-15',
+    C.CUSTOMER_KEY,
+    S.STORE_KEY,
+    P.PRODUCT_KEY,
+    1,
+    P.UNIT_PRICE,
+    1 * P.UNIT_PRICE
+FROM DIM_CUSTOMER_HYBRID C
+JOIN DIM_STORE S
+    ON S.STORE_ID = 201
+JOIN DIM_PRODUCT P
+    ON P.PRODUCT_ID = 503
+WHERE C.CUSTOMER_ID = 101
+  AND C.IS_CURRENT = TRUE;
+
+
+/*==============================================================
+  TASK 12 — VERIFY CUSTOMER HISTORY
+==============================================================*/
+
+SELECT
+    CUSTOMER_KEY,
+    CUSTOMER_ID,
+    CUSTOMER_NAME,
+    CITY,
+    PREVIOUS_CITY,
+    STATE,
+    CURRENT_MEMBERSHIP,
+    PREVIOUS_MEMBERSHIP,
+    HISTORICAL_MEMBERSHIP,
+    SEGMENT,
+    EFFECTIVE_DATE,
+    EXPIRY_DATE,
+    IS_CURRENT
+FROM DIM_CUSTOMER_HYBRID
+ORDER BY CUSTOMER_ID, EFFECTIVE_DATE;
+
+
+/*==============================================================
+  TASK 13 — POINT-IN-TIME POS ANALYTICS
+  Customer 101's membership and segment at the time
+  of each purchase
+==============================================================*/
+
+SELECT
+    F.TRANSACTION_ID,
+    F.TRANSACTION_DATE,
+    C.CUSTOMER_ID,
+    C.HISTORICAL_MEMBERSHIP,
+    C.SEGMENT,
+    P.PRODUCT_NAME,
+    S.STORE_NAME,
+    F.QUANTITY,
+    F.UNIT_PRICE,
+    F.TOTAL_AMOUNT
+FROM FACT_SALES F
+JOIN DIM_CUSTOMER_HYBRID C
+    ON F.CUSTOMER_KEY = C.CUSTOMER_KEY
+JOIN DIM_PRODUCT P
+    ON F.PRODUCT_KEY = P.PRODUCT_KEY
+JOIN DIM_STORE S
+    ON F.STORE_KEY = S.STORE_KEY
+WHERE C.CUSTOMER_ID = 101
+ORDER BY F.TRANSACTION_DATE;
+
+
+/*==============================================================
+  TASK 14 — FINAL AUDIT / VALIDATION
+==============================================================*/
+
+/* Store count */
+SELECT COUNT(*) AS STORE_COUNT
+FROM DIM_STORE;
+
+
+/* Product count */
+SELECT COUNT(*) AS PRODUCT_COUNT
+FROM DIM_PRODUCT;
+
+
+/* Total customer dimension rows */
+SELECT COUNT(*) AS CUSTOMER_TOTAL
+FROM DIM_CUSTOMER_HYBRID;
+
+
+/* Current customer rows */
+SELECT COUNT(*) AS CURRENT_CUSTOMER_COUNT
+FROM DIM_CUSTOMER_HYBRID
+WHERE IS_CURRENT = TRUE;
+
+
+/* Historical customer rows */
+SELECT COUNT(*) AS HISTORICAL_CUSTOMER_COUNT
+FROM DIM_CUSTOMER_HYBRID
+WHERE IS_CURRENT = FALSE;
+
+
+/* Fact sales count */
+SELECT COUNT(*) AS FACT_SALES_COUNT
+FROM FACT_SALES;
+
+
